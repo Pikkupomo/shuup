@@ -207,10 +207,13 @@ class Product(TaxableItem, AttributableMixin, TranslatableModel):
         "self", null=True, blank=True, related_name='variation_children',
         on_delete=models.PROTECT,
         verbose_name=_('variation parent'))
+
+    # Deprecation Warning: 2.0
     stock_behavior = EnumIntegerField(
         StockBehavior, default=StockBehavior.UNSTOCKED, verbose_name=_('stock'),
         help_text=_("Set to stocked if inventory should be managed within Shuup.")
     )
+
     shipping_mode = EnumIntegerField(
         ShippingMode, default=ShippingMode.SHIPPED, verbose_name=_('shipping mode'),
         help_text=_("Set to shipped if the product requires shipment.")

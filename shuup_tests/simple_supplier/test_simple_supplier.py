@@ -10,22 +10,29 @@ import random
 from time import time
 
 import pytest
+from django.core.exceptions import ValidationError
 from django.test import override_settings
 
 from shuup.admin.modules.products.views.edit import ProductEditView
+from shuup.apps.provides import override_provides
 from shuup.core import cache
-from shuup.core.models import StockBehavior
+from shuup.core.models import ShippingMode, StockBehavior, Product, Supplier, Order, Shipment
 from shuup.simple_supplier.admin_module.forms import SimpleSupplierForm
 from shuup.simple_supplier.admin_module.views import (
     process_alert_limit, process_stock_adjustment
 )
 from shuup.simple_supplier.models import StockAdjustment, StockCount
+from shuup.simple_supplier.module import SimpleSupplierModule
 from shuup.simple_supplier.notify_events import AlertLimitReached
 from shuup.testing.factories import (
-    create_order_with_product, create_product, get_default_shop
-)
+    create_order_with_product, create_product, get_default_shop,
+    create_random_person)
 from shuup.testing.utils import apply_request_middleware
-from shuup_tests.simple_supplier.utils import get_simple_supplier
+from shuup_tests.simple_supplier.utils import get_simple_supplier, create_completed_order
+
+class NonStockedSupplier(SimpleSupplierModule):
+    identifier = "non_stocked_simple_supplier"
+    name = "Non Stocked Simple Supplier"
 
 
 @pytest.mark.django_db
@@ -56,22 +63,37 @@ def test_simple_supplier(rf):
 
 
 @pytest.mark.django_db
-def test_supplier_with_stock_counts(rf):
-    supplier = get_simple_supplier()
+@pytest.mark.parametrize("stock_behavior, shipping_mode, stock_managed, expect_errors", [
+    (StockBehavior.UNSTOCKED, ShippingMode.SHIPPED, True, True),
+    (StockBehavior.UNSTOCKED, ShippingMode.NOT_SHIPPED, True, True),
+    (StockBehavior.UNSTOCKED, ShippingMode.NOT_SHIPPED, False, True),
+    (StockBehavior.STOCKED, ShippingMode.SHIPPED, True, True),
+    (StockBehavior.STOCKED, ShippingMode.NOT_SHIPPED, True, True),
+    (StockBehavior.STOCKED, ShippingMode.NOT_SHIPPED, False, True),
+])
+def test_supplier_with_stock_counts(rf, stock_managed, shipping_mode, stock_behavior, expect_errors):
+    supplier = get_simple_supplier(stock_managed)
     shop = get_default_shop()
     product = create_product("simple-test-product", shop, supplier)
     quantity = random.randint(100, 600)
     supplier.adjust_stock(product.pk, quantity)
     assert supplier.get_stock_statuses([product.id])[product.id].logical_count == quantity
-    # No orderability errors since product is not stocked
-    assert not list(supplier.get_orderability_errors(product.get_shop_instance(shop), quantity+1, customer=None))
+    if stock_managed:
+        assert list(supplier.get_orderability_errors(product.get_shop_instance(shop), quantity+1, customer=None))
+    else:
+        assert list(supplier.get_orderability_errors(product.get_shop_instance(shop), quantity+1, customer=None))
 
-    product.stock_behavior = StockBehavior.STOCKED  # Make product stocked
+    product.shipping_mode = shipping_mode
+    product.stock_behavior = stock_behavior  # Will deprecate
     product.save()
 
-    assert not list(supplier.get_orderability_errors(product.get_shop_instance(shop), quantity, customer=None))
-    # Now since product is stocked we get orderability error with quantity + 1
-    assert list(supplier.get_orderability_errors(product.get_shop_instance(shop), quantity+1, customer=None))
+    if stock_managed:
+        assert not list(supplier.get_orderability_errors(product.get_shop_instance(shop), quantity, customer=None))
+        assert list(supplier.get_orderability_errors(product.get_shop_instance(shop), quantity+1, customer=None))
+    else:
+        assert list(supplier.get_orderability_errors(product.get_shop_instance(shop), quantity, customer=None))
+        assert not list(supplier.get_orderability_errors(product.get_shop_instance(shop), quantity+1, customer=None))
+
 
 
 @pytest.mark.django_db
@@ -239,3 +261,173 @@ def test_alert_limit_notification(rf, admin_user):
 
     event = AlertLimitReached(product=product, supplier=supplier)
     assert event.variable_values["dispatched_last_24hs"] is False
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize("stock_behavior, shipping_mode, stock_managed, is_orderable", [
+    (StockBehavior.UNSTOCKED, ShippingMode.SHIPPED, True, True),
+    (StockBehavior.UNSTOCKED, ShippingMode.NOT_SHIPPED, True, True),
+    (StockBehavior.UNSTOCKED, ShippingMode.NOT_SHIPPED, False, True),
+    (StockBehavior.STOCKED, ShippingMode.SHIPPED, True, True),
+    (StockBehavior.STOCKED, ShippingMode.NOT_SHIPPED, True, True),
+    (StockBehavior.STOCKED, ShippingMode.NOT_SHIPPED, False, True),
+])
+def test_supplier_with_shipping_mode(settings, stock_behavior, shipping_mode, stock_managed, is_orderable):
+    customer = create_random_person()
+
+    with override_settings(SHUUP_HOME_CURRENCY="USD", SHUUP_ENABLE_MULTIPLE_SHOPS=False):
+        supplier = get_simple_supplier(stock_managed)
+        shop = get_default_shop()
+        assert shop.prices_include_tax
+        assert shop.currency != settings.SHUUP_HOME_CURRENCY
+
+        # TODO: ENABLE?
+        # with pytest.raises(ValidationError):
+        #     product = create_product("simple-test-product", shop, None, stock_behavior=stock_behavior,
+        #                          shipping_mode=shipping_mode)
+
+        product = create_product("simple-test-product", shop, supplier, stock_behavior=stock_behavior, shipping_mode=shipping_mode)
+        sp = product.get_shop_instance(shop)
+        # # no stocks yet
+        if shipping_mode == ShippingMode.SHIPPED:
+            # Not orderable because no stock
+            assert not sp.is_orderable(supplier=supplier, customer=customer, quantity=1, allow_cache=False)
+            supplier.adjust_stock(product.pk, 2)
+
+            # order one product
+            create_completed_order(product, supplier, 1, shop)
+            assert sp.is_orderable(
+                supplier=supplier, customer=customer, quantity=1, allow_cache=False) == is_orderable
+
+            # order one product
+            create_completed_order(product, supplier, 1, shop)
+            assert not sp.is_orderable(
+                supplier=supplier, customer=customer, quantity=1, allow_cache=False) == is_orderable
+        else:
+            # not shipped always orderable
+            assert sp.is_orderable(supplier=supplier, customer=customer, quantity=1, allow_cache=False) == is_orderable
+            create_completed_order(product, supplier, 1, shop)
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize("shipping_mode, stock_managed", [
+    (ShippingMode.SHIPPED, True),
+    (ShippingMode.SHIPPED, False),  # This should not be allowed
+    (ShippingMode.NOT_SHIPPED, True),
+    (ShippingMode.NOT_SHIPPED, False),
+])
+def test_supplier_with_shipping_mode2(settings, shipping_mode, stock_managed):
+    with override_settings(SHUUP_ENABLE_MULTIPLE_SHOPS=False):
+        with override_provides("supplier_module", [
+            "shuup.simple_supplier.module:SimpleSupplierModule",
+            "shuup_tests.simple_supplier.test_simple_supplier:NonStockedSupplier"
+        ]):
+            supplier1 = get_simple_supplier(stock_managed)
+            supplier2, cr = Supplier.objects.update_or_create(
+                identifier=NonStockedSupplier.identifier,
+                defaults=dict(
+                    name=NonStockedSupplier.name,
+                    module_identifier=NonStockedSupplier.identifier,
+                    stock_managed=False
+                )
+            )
+            shop = get_default_shop()
+            supplier2.shops.add(shop)
+
+            kwargs = dict(shipping_mode=shipping_mode, stock_managed=stock_managed)
+            assert_multiple_suppliers(supplier1, supplier2, **kwargs)
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize("shipping_mode, stock_managed", [
+    (ShippingMode.SHIPPED, True),
+    (ShippingMode.SHIPPED, False),  # This should not be allowed
+    (ShippingMode.NOT_SHIPPED, True),
+    (ShippingMode.NOT_SHIPPED, False),
+])
+def test_supplier_with_shipping_mode3(settings, shipping_mode, stock_managed):
+    with override_settings(SHUUP_ENABLE_MULTIPLE_SHOPS=False):
+        with override_provides("supplier_module", [
+            "shuup.simple_supplier.module:SimpleSupplierModule",
+            "shuup_tests.simple_supplier.test_simple_supplier:NonStockedSupplier"
+        ]):
+            supplier1 = get_simple_supplier(stock_managed)
+            supplier2, cr = Supplier.objects.update_or_create(
+                identifier=NonStockedSupplier.identifier,
+                defaults=dict(
+                    name=NonStockedSupplier.name,
+                    module_identifier=NonStockedSupplier.identifier,
+                    stock_managed=False
+                )
+            )
+            shop = get_default_shop()
+            supplier2.shops.add(shop)
+
+            kwargs = dict(shipping_mode=shipping_mode, stock_managed=stock_managed)
+            assert_multiple_suppliers(supplier2, supplier1, **kwargs)
+
+
+def assert_multiple_suppliers(primary_supplier, secondary_supplier, shipping_mode, stock_managed):
+    customer = create_random_person()
+    shop = get_default_shop()
+    assert primary_supplier != secondary_supplier
+    product = Product.objects.filter(sku="simple-test-product").first()
+    if not product:
+        product = create_product("simple-test-product", shop, None, shipping_mode=shipping_mode)
+    sp = product.get_shop_instance(shop)
+    sp.suppliers.clear()
+    sp.suppliers.add(primary_supplier)
+    sp.suppliers.add(secondary_supplier)
+
+    if primary_supplier.stock_managed:
+        assert not sp.is_orderable(
+            supplier=primary_supplier, customer=customer, quantity=1, allow_cache=False
+        ) == (shipping_mode == ShippingMode.SHIPPED)
+        assert sp.is_orderable(supplier=secondary_supplier, customer=customer, quantity=1, allow_cache=False)
+
+        # Add one product to stock for both
+        primary_supplier.adjust_stock(product.pk, 1)
+
+        assert sp.is_orderable(supplier=primary_supplier, customer=customer, quantity=1, allow_cache=False)
+        assert sp.is_orderable(supplier=secondary_supplier, customer=customer, quantity=1, allow_cache=False)
+
+        stock_status = primary_supplier.get_stock_statuses([product.pk])[product.pk]
+        assert stock_status.logical_count == 1
+        assert stock_status.physical_count == 1
+
+        create_completed_order(product, primary_supplier, 1, shop)
+        assert Order.objects.filter(shop=shop).count() == 1
+
+        assert not sp.is_orderable(
+            supplier=primary_supplier, customer=customer, quantity=1, allow_cache=False
+        ) == (shipping_mode == ShippingMode.SHIPPED)
+        stock_status = primary_supplier.get_stock_statuses([product.pk])[product.pk]
+        assert stock_status.logical_count == 0
+        assert stock_status.physical_count == 0 if shipping_mode == ShippingMode.SHIPPED else 1
+
+        create_completed_order(product, secondary_supplier, 1, shop)
+        # not stocked, always orderable
+        assert sp.is_orderable(supplier=secondary_supplier, customer=customer, quantity=1, allow_cache=False)
+    else:
+        # supplier 1 is primary and it's not stock_managed
+        assert sp.is_orderable(supplier=primary_supplier, customer=customer, quantity=1, allow_cache=False)
+        assert not sp.is_orderable(
+            supplier=secondary_supplier, customer=customer, quantity=1, allow_cache=False
+        ) == (secondary_supplier.stock_managed and shipping_mode == ShippingMode.SHIPPED)
+
+        secondary_supplier.adjust_stock(product.pk, 1)
+        stock_status = primary_supplier.get_stock_statuses([product.pk])[product.pk]
+        assert stock_status.logical_count == 0
+        assert stock_status.physical_count == 0
+
+        assert sp.is_orderable(supplier=primary_supplier, customer=customer, quantity=1, allow_cache=False)
+        assert sp.is_orderable(supplier=secondary_supplier, customer=customer, quantity=1, allow_cache=False)
+
+        create_completed_order(product, primary_supplier, 1, shop)
+        assert sp.is_orderable(supplier=primary_supplier, customer=customer, quantity=1, allow_cache=False)
+
+        create_completed_order(product, secondary_supplier, 1, shop)
+        # not stocked, always orderable
+        assert not sp.is_orderable(
+            supplier=secondary_supplier, customer=customer, quantity=1, allow_cache=False
+        ) == (secondary_supplier.stock_managed and shipping_mode == ShippingMode.SHIPPED)
