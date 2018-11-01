@@ -240,3 +240,7 @@ SHUUP_SHOP_PRODUCT_SUPPLIERS_STRATEGY = (
 #: Spec which provides the current shop for a given request and set of parameters.
 SHUUP_REQUEST_SHOP_PROVIDER_SPEC = (
     "shuup.core.shop_provider.DefaultShopProvider")
+
+#: Spec which provides the current shop for a given request and set of parameters.
+SHUUP_REQUEST_SUPPLIER_PROVIDER_SPEC = (
+    "shuup.core.supplier_provider.DefaultSupplierProvider")

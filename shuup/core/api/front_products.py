@@ -203,7 +203,7 @@ class CompleteShopProductSerializer(serializers.ModelSerializer):
         return shop_product.get_short_description()
 
     def _get_pricing_context(self, request, shop):
-        return PricingContext(shop=shop, customer=self.context["customer"])
+        return PricingContext(shop=shop, customer=self.context["customer"], request=request)
 
     def get_image(self, shop_product):
         image = shop_product.product.primary_image

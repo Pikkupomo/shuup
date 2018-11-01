@@ -16,6 +16,7 @@ from django.utils import timezone, translation
 from django.utils.lru_cache import lru_cache
 from django.utils.translation import ugettext_lazy as _
 
+from shuup.core.supplier_provider import get_supplier
 from shuup.core.middleware import ExceptionMiddleware
 from shuup.core.models import Contact, get_company_contact, get_person_contact
 from shuup.core.shop_provider import get_shop
@@ -69,6 +70,10 @@ class ShuupFrontMiddleware(object):
         self._set_basket(request)
         self._set_timezone(request)
         self._set_price_display_options(request)
+        self._set_supplier(request)  # Todo move
+
+    def _set_supplier(self, request):
+        request.supplier = get_supplier(request)
 
     def _set_shop(self, request):
         """

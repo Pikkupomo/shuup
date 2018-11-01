@@ -80,3 +80,10 @@ def set_shop(request, shop=None):
 
 def unset_shop(request):
     get_shop_provider().unset_shop(request)
+
+
+def get_supplier(request):
+    # TODO: get supplier from GET param or based on username
+    shop = get_shop(request)
+    from shuup.core.models import Supplier
+    return Supplier.objects.last() if shop.id != 1 else Supplier.objects.first()

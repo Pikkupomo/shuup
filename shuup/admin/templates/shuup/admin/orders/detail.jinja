@@ -50,19 +50,19 @@
                             {{ info_row(_("Shipping Method"), order.get_shipping_method_display()) }}
                         </div>
                     </div>
-                            <div class="col-md-6">
-                                <div class="list-group">
-                                    {{ contact_row(_("Customer"), order.customer) }}
-                                    {{ contact_row(_("Ordered by"), order.orderer) }}
-                                    {{ info_row(_("Creator"), order.creator, creator_url) }}
-                                    {{ info_row(_("Phone"), order.phone, "tel:" ~ order.phone) }}
-                                    {{ info_row(_("Email"), order.email, "mailto:" ~ order.email) }}
-                                    {{ info_row(_("Tax number"), order.tax_number) }}
-                                    {{ info_row(_("Total Price (taxless)"), order.taxless_total_price|money) }}
-                                    {{ info_row(_("Total Price"), order.taxful_total_price|money) }}
-                                    {{ info_row(_("Customer Comment"), order.customer_comment|linebreaksbr) }}
-                                </div>
-                            </div>
+                    <div class="col-md-6">
+                        <div class="list-group">
+                            {{ contact_row(_("Customer"), order.customer) }}
+                            {{ contact_row(_("Ordered by"), order.orderer) }}
+                            {{ info_row(_("Creator"), order.creator, creator_url) }}
+                            {{ info_row(_("Phone"), order.phone, "tel:" ~ order.phone) }}
+                            {{ info_row(_("Email"), order.email, "mailto:" ~ order.email) }}
+                            {{ info_row(_("Tax number"), order.tax_number) }}
+                            {{ info_row(_("Total Price (taxless)"), order.taxless_total_price|money) }}
+                            {{ info_row(_("Total Price"), order.taxful_total_price|money) }}
+                            {{ info_row(_("Customer Comment"), order.customer_comment|linebreaksbr) }}
+                        </div>
+                    </div>
                     <div class="col-md-6">
                         <div class="list-group">
                             {% set tracking_codes = order.get_tracking_codes() %}

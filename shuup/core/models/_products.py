@@ -129,6 +129,13 @@ class ProductType(TranslatableModel):
         return (self.safe_translation_getter("name") or self.identifier)
 
 
+class AbstractProductQuerySet(TranslatableQuerySet):
+    def _visible(self, shop, customer, language=None):
+        root = (self.language(language) if language else self)
+        return root.all().filter(shop_products__shop=shop)
+
+
+
 class ProductQuerySet(TranslatableQuerySet):
     _invisible_modes = [ProductMode.VARIATION_CHILD]
 

@@ -7,7 +7,7 @@
 # LICENSE file in the root directory of this source tree.
 from __future__ import unicode_literals
 
-from shuup.admin.shop_provider import get_shop
+from shuup.admin.shop_provider import get_shop, get_supplier
 
 
 class ShuupAdminMiddleware(object):
@@ -25,3 +25,4 @@ class ShuupAdminMiddleware(object):
             shop = get_shop(request)
             if shop:
                 request.shop = shop
+            request.supplier = get_supplier(request)
