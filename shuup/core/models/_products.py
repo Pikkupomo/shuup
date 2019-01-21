@@ -106,6 +106,8 @@ class ProductVerificationMode(Enum):
 
 @python_2_unicode_compatible
 class ProductType(TranslatableModel):
+    default_identifier = "default"
+
     identifier = InternalIdentifierField(unique=True)
     translations = TranslatedFields(
         name=models.CharField(max_length=64, verbose_name=_('name'), help_text=_(
@@ -127,6 +129,10 @@ class ProductType(TranslatableModel):
 
     def __str__(self):
         return (self.safe_translation_getter("name") or self.identifier)
+
+    @classmethod
+    def get_default(cls):
+        return cls.objects.filter(identifier=cls.default_identifier).first()
 
 
 class ProductQuerySet(TranslatableQuerySet):
@@ -254,7 +260,7 @@ class Product(TaxableItem, AttributableMixin, TranslatableModel):
         )
     )
     sku = models.CharField(
-        db_index=True, max_length=128, verbose_name=_('SKU'), unique=True,
+        db_index=True, max_length=128, verbose_name=_('SKU'), unique=False,
         help_text=_(
             "Enter a SKU (Stock Keeping Unit) number for your product. "
             "This is a product identification code that helps you track it through your inventory. "
@@ -323,6 +329,8 @@ class Product(TaxableItem, AttributableMixin, TranslatableModel):
         related_name="primary_image_for_products",
         on_delete=models.SET_NULL,
         verbose_name=_("primary image"))
+
+    is_shared = models.BooleanField(default=False)
 
     translations = TranslatedFields(
         name=models.CharField(

@@ -29,8 +29,10 @@ from shuup.utils.importing import cached_load
 from shuup.utils.properties import MoneyPropped, PriceProperty
 
 from ._product_media import ProductMediaKind
-from ._products import ProductMode, ProductVisibility
-from ._units import DisplayUnit, PiecesSalesUnit, UnitInterface
+from ._products import (
+    Product, ProductMode, ProductType, ProductVisibility, StockBehavior
+)
+from ._units import DisplayUnit, PiecesSalesUnit, SalesUnit, UnitInterface
 
 mark_safe_lazy = lazy(mark_safe, six.text_type)
 
@@ -203,6 +205,101 @@ class ShopProduct(MoneyPropped, TranslatableModel):
 
     class Meta:
         unique_together = (("shop", "product",),)
+
+    @classmethod  # noqa (C901)
+    def create_product(cls, sku, shop, creation_data):
+        data = creation_data.copy()
+        shared = data.get("shared", False)
+
+
+        def create_prod(data):
+            product_info = data.get("product_info", {})
+            product_type = product_info.pop("product_type", None)
+
+            if not product_type:
+                product_type = ProductType.get_default()
+            else:
+                if not isinstance(product_type, ProductType):
+                    product_type = ProductType.objects.filter(pk=product_type).first()
+
+            # handle tax
+            from shuup.core.models import TaxClass
+            tax_class = product_info.pop("tax_class", None)
+
+            if not tax_class:
+                tax_class = TaxClass.get_default()
+            else:
+                if not isinstance(tax_class, TaxClass):
+                    tax_class = TaxClass.objects.filter(pk=tax_class).first()
+
+            # handle sales unit
+            sales_unit = product_info.pop("sales_unit", None)
+
+            if not sales_unit:
+                sales_unit = SalesUnit.get_default()
+            else:
+                if not isinstance(sales_unit, SalesUnit):
+                    sales_unit = SalesUnit.objects.filter(pk=sales_unit).first()
+
+            product_attrs = dict(
+                type=product_type,
+                tax_class=tax_class,
+                sku=sku,
+                name=product_info.pop("name", sku.title()),
+                sales_unit=sales_unit,
+                stock_behavior=product_info.pop("stock_behavior", StockBehavior.UNSTOCKED)
+            )
+            product_attrs.update(product_info)
+            product = Product(**product_attrs)
+            product.full_clean()
+            product.save()
+            return product
+
+        # TODO: Add provider
+        product = None
+        if not shared:
+            if ShopProduct.objects.filter(product__sku=sku, shop=shop).exists():
+                raise ValueError("Duplicate SKU's are not allowed inside one shop")
+        else:
+            # Test 3 fails here, Question: should we use existing product in "shared" state if possible here?
+            # creating shared product, no product with this sku should exists
+            product = Product.objects.filter(sku=sku).first()
+
+        if not product:
+            product = create_prod(data)
+
+        sp_data = data.pop("shop_product")
+
+        supplier = sp_data.pop("supplier", None)
+
+        price_info = data.pop("price_info", {})
+        default_price = price_info.get("default_price", 0)
+
+        if default_price is not None:
+            default_price = shop.create_price(default_price)
+
+
+        visibility = sp_data.pop("visibility", ShopProductVisibility.ALWAYS_VISIBLE)
+        sp = ShopProduct.objects.filter(product=product, shop=shop).first()
+        if not sp:
+            sp = ShopProduct.objects.create(
+                product=product,
+                shop=shop,
+                default_price=default_price,
+                visibility=visibility
+            )
+
+            for k, v in six.iteritems(sp_data):
+                if hasattr(sp, k):
+                    setattr(sp, k, v)
+
+            sp.save()
+
+            if supplier:
+                sp.suppliers.add(supplier)
+            sp.save()
+
+        return sp
 
     def save(self, *args, **kwargs):
         self.clean()

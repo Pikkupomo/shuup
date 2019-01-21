@@ -11,8 +11,9 @@ from shuup import configuration
 
 from shuup.core.models import (
     AnonymousContact, get_person_contact, Product, ProductVisibility,
-    ShopProductVisibility
-)
+    ShopProductVisibility,
+    ShopStatus, Shop)
+from shuup.core.utils.product import get_product_name
 from shuup.testing.factories import (
     create_product, get_default_customer_group, get_default_shop,
     get_default_shop_product, get_default_supplier, get_all_seeing_key

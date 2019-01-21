@@ -26,6 +26,7 @@ class ShuupModel(models.Model):
     Shuup Model.
     """
     identifier_attr = 'identifier'
+    default_identifier = "default"
 
     def __repr__(self):
         identifier = getattr(self, self.identifier_attr, None)
@@ -37,6 +38,11 @@ class ShuupModel(models.Model):
 
     class Meta:
         abstract = True
+
+
+    @classmethod
+    def get_default(cls):
+        return cls.objects.filter(identifier=cls.default_identifier).first()
 
 
 @python_2_unicode_compatible
